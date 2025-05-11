@@ -1,0 +1,450 @@
+﻿@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Google.OrTools.Sat
+@using SchedulingWebApp.Models
+@using SchedulingWebApp.Services
+@inject ISchedulingService schedulingService 
+
+<PageTitle>Home</PageTitle>
+
+<div class="page-layout">
+    <h1>Your scheduler!</h1>
+
+    <div class="spacer"></div>
+
+    <InputCheckbox @bind-Value="_keepRequirments" />
+    <label>Keep Requirements</label>
+
+</div>
+
+<table class="schedule-table withBottomSpace">
+    <thead>
+        <tr>
+            <th>&nbsp;</th>
+            @foreach(int d in SchedulingService.AllDays)
+            {
+                <th>Day @(d + 1)</th>
+            }
+        </tr>
+    </thead>
+
+    <tbody>
+        @foreach(int e in SchedulingService.AllEmployees)
+        {
+            <tr>
+                <th>Employee @(e + 1)</th>
+                @foreach(int d in SchedulingService.AllDays)
+                {
+                    <td>
+                        <div class="subcell-container">
+                            @foreach(int s in SchedulingService.AllShifts)
+                            {
+                               <div 
+                                   class="subcell @(IsPreferred(e, d, s) ? " preferred" : "") @(IsUnavailable(e, d, s) ? " unavailable" : "")"
+                                   @onclick="() => ChangePreferredStatus(e, d, s)"
+                                   @ondblclick="() => ChangeUnavailableStatus(e, d, s)"
+                               > Shift @(s + 1)</div>
+                            }
+                            
+                        </div>
+                    </td>
+                }
+            </tr>
+        }
+    </tbody>
+</table>
+
+<button style="margin-bottom: 20px;" class="btn btn-primary" @onclick="Generate">
+    Generate
+</button>
+
+
+@if (schedules.Count != 0)
+{
+    <div class="page-layout">
+        <h2 class="withBottomSpace">Schedule for week @_currentScheduleNumber</h2>
+
+        <div class="spacer"></div> 
+
+        <div class="number-controls">
+            <button class="arrow-button" disabled="@_isDisabledPrevious" @onclick="ShowPreviousSchedule">&#8592;</button>
+            <button class="arrow-button" disabled="@_isDisabledNext" @onclick="ShowNextSchedule">&#8594;</button>
+        </div>
+    </div>
+
+    <p style="margin-left: 20px" class="withBottomSpace">@((MarkupString)GetOuputText())</p>
+
+    <table class="schedule-table">
+        <thead>
+            <tr>
+                <th>&nbsp;</th>
+                @foreach (int d in SchedulingService.AllDays)
+                {
+                    <th>Day @(d + 1)</th>
+                }
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (int e in SchedulingService.AllEmployees)
+            {
+                <tr>
+
+                    <th style="text-align: center;">
+                        Employee @(e + 1)<br />
+                        <span style="font-weight: normal; font-size: smaller;">@GetTextForUnsatisfiedPreferences(e)</span>
+                    </th>
+
+                    @foreach (int d in SchedulingService.AllDays)
+                    {
+                        <td>
+                            <div class="subcell-container">
+                                @foreach (int s in SchedulingService.AllShifts)
+                                {
+                                    <div class="subcell @GetCurrentScheduleStyle(e,d,s)"
+                                         >
+                                        Shift @(s + 1)
+                                    </div>
+                                }
+
+                            </div>
+                        </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    
+}
+
+
+@code {
+    private List<Schedule> schedules;
+    private Schedule _previousSchedule;
+    private Schedule _newSchedule;
+    private int _currentScheduleNumber = 0;
+    private bool _isDisabledPrevious = true;
+    private bool _isDisabledNext = true;
+    private bool _keepRequirments = true;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        schedules = new List<Schedule>();
+        _previousSchedule = new Schedule();
+        _newSchedule = new Schedule();
+    }
+
+    private void Generate()
+    {
+
+        //Set preferences priority
+        int[] preferencesPriority = GetPreferencesPriority();
+
+        //Apply coef to preferences
+        int[,,] preferencesWithCoef = new int[SchedulingService.NumEmployees, SchedulingService.NumDays, SchedulingService.NumShifts];
+        for (int e = 0; e < SchedulingService.NumEmployees; e++)
+        {
+            for (int d = 0; d < SchedulingService.NumDays; d++)
+            {
+                for (int s = 0; s < SchedulingService.NumShifts; s++)
+                {
+                    preferencesWithCoef[e, d, s] = (_newSchedule.ShiftPreferences[e, d, s] ? 1 : 0) * preferencesPriority[e];
+                }
+            }
+        }
+
+
+        //Count total preferences
+        int[] numberOfPreferences = new int[SchedulingService.NumEmployees];
+        foreach (int e in SchedulingService.AllEmployees)
+        {
+            int totalPreferences = 0;
+            foreach (int d in SchedulingService.AllDays)
+            {
+                foreach (int s in SchedulingService.AllShifts)
+                {
+                    if (_newSchedule.ShiftPreferences[e, d, s])
+                    {
+                        totalPreferences++;
+                    }
+                }
+            }
+            numberOfPreferences[e] = totalPreferences;
+        }
+        _newSchedule.PreferencesCount = numberOfPreferences;
+
+        //Create Schedule
+        SchedulingResult schedulingResult = schedulingService.Generate(preferencesWithCoef, _newSchedule.UnavailabilityRequests);
+        _newSchedule.SchedulingResult = schedulingResult;
+
+        if (schedulingResult.Status != CpSolverStatus.Optimal && schedulingResult.Status != CpSolverStatus.Feasible)
+        {
+            AddSchedule(_newSchedule);
+            _newSchedule = CreateNewSchedule();
+            return;
+        }
+
+
+        //Count unsatisfied preferences
+        int[] unsatisfiedPreferencesCount = new int[SchedulingService.NumEmployees];
+
+        foreach (int e in SchedulingService.AllEmployees)
+        {
+            int unsatisfiedPreferences = 0;
+            foreach (int d in SchedulingService.AllDays)
+            {
+                foreach (int s in SchedulingService.AllShifts)
+                {
+                    if (_newSchedule.SchedulingResult.ShiftsAssingment[e, d, s] == false && _newSchedule.ShiftPreferences[e, d, s])
+                    {
+                        unsatisfiedPreferences++;
+                    }
+                }
+            }
+            unsatisfiedPreferencesCount[e] = unsatisfiedPreferences;
+        }
+
+        _newSchedule.UnsatisfiedPreferencesCount = unsatisfiedPreferencesCount;
+
+        //Count unsatisfaction streak
+        if(schedules.Count == 0)
+        {
+            foreach(int e in SchedulingService.AllEmployees)
+            {
+                _newSchedule.UnsatisfactionStreak[e] = _newSchedule.UnsatisfiedPreferencesCount[e] != 0 ? 1 : 0;
+            }   
+        }
+        else
+        {
+            Schedule previousSchedule = schedules.Last();
+            foreach(int e in SchedulingService.AllEmployees)
+            {
+                if(previousSchedule.UnsatisfiedPreferencesCount[e] <= _newSchedule.UnsatisfiedPreferencesCount[e] && _newSchedule.UnsatisfiedPreferencesCount[e] > 0)
+                {
+                    _newSchedule.UnsatisfactionStreak[e]++;
+                }
+                else
+                {
+                    _newSchedule.UnsatisfactionStreak[e] = 0;
+                }
+            }
+        }
+
+
+        //Save the schedule
+        AddSchedule(_newSchedule);
+        _newSchedule = CreateNewSchedule();
+
+    }
+
+    private bool IsPreferred(int e, int d, int s)
+    {
+        return _newSchedule.ShiftPreferences[e, d, s];
+    }
+
+    private bool IsUnavailable(int e, int d, int s)
+    {
+        return _newSchedule.UnavailabilityRequests[e, d, s];
+    }
+
+    private void ChangePreferredStatus(int e, int d, int s)
+    {
+        if (!_newSchedule.UnavailabilityRequests[e, d, s])
+        {
+            if(!_newSchedule.ShiftPreferences[e, d, s])
+            {
+                if (_newSchedule.PreferencesCount[e] < SchedulingService.MaxNumberOfRequirments)
+                {
+                    _newSchedule.ShiftPreferences[e, d, s] = !_newSchedule.ShiftPreferences[e, d, s];
+                    _newSchedule.PreferencesCount[e]++;
+                }
+            }
+            else
+            {
+                _newSchedule.ShiftPreferences[e, d, s] = !_newSchedule.ShiftPreferences[e, d, s];
+                _newSchedule.PreferencesCount[e]--;
+            }
+        }
+    }
+
+    private void ChangeUnavailableStatus(int e, int d, int s)
+    {
+        if(!_newSchedule.ShiftPreferences[e, d, s])
+        {
+            if (!_newSchedule.UnavailabilityRequests[e, d, s])
+            {
+                if(_newSchedule.UnavailabilityCount[e] < SchedulingService.MaxNumberOfRequirments)
+                {
+                    _newSchedule.UnavailabilityRequests[e, d, s] = !_newSchedule.UnavailabilityRequests[e, d, s];
+                    _newSchedule.UnavailabilityCount[e]++;
+                }
+            }
+            else
+            {
+                _newSchedule.UnavailabilityRequests[e, d, s] = !_newSchedule.UnavailabilityRequests[e, d, s];
+                _newSchedule.UnavailabilityCount[e]--;
+            }
+        }
+    }
+
+    private string GetCurrentScheduleStyle(int e, int d, int s)
+    {
+        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
+        if(currentSchedule.SchedulingResult.ShiftsAssingment[e, d, s])
+        {
+            if(currentSchedule.ShiftPreferences[e, d, s])
+            {
+                return "scheduledPreferred";
+            }
+            else
+            {
+                return "scheduled";
+            }
+        }
+        if (currentSchedule.ShiftPreferences[e, d, s])
+        {
+            return "preferredNotScheduled";
+        }
+
+        if (currentSchedule.UnavailabilityRequests[e, d, s])
+        {
+            return "unavailableNotPreferred";
+        }
+
+        return "";
+    }
+
+    private void ShowNextSchedule()
+    {
+        _currentScheduleNumber++;
+        if(_currentScheduleNumber - 1 > 0){
+            _isDisabledPrevious = false;
+        }
+        if (_currentScheduleNumber - 1 >= schedules.Count - 1)
+        {
+            _isDisabledNext = true;
+        }
+    }
+
+    private void ShowPreviousSchedule()
+    {
+        _currentScheduleNumber--;
+        if(_currentScheduleNumber - 1 < schedules.Count - 1)
+        {
+            _isDisabledNext = false;
+        }
+        if (_currentScheduleNumber  - 1 <= 0)
+        {
+            _isDisabledPrevious = true;
+        }
+    }
+
+    private void SetCurrentScheduleNumber(int scheduleNumber)
+    {
+        if(scheduleNumber < 1 || scheduleNumber > schedules.Count)
+        {
+            return;
+        }
+
+        if(scheduleNumber == 1)
+        {
+            _isDisabledPrevious = true;
+        }
+        else
+        {
+            _isDisabledPrevious = false;
+        }
+
+        if(scheduleNumber == schedules.Count)
+        {
+            _isDisabledNext = true;
+        }
+        else
+        {
+            _isDisabledNext = false;
+        }
+
+        _currentScheduleNumber = scheduleNumber;
+    }
+
+    private void AddSchedule(Schedule schedule)
+    {
+        schedules.Add(schedule);
+        SetCurrentScheduleNumber(schedules.Count);
+    }
+
+    private string GetOuputText()
+    {
+        string outputText = "";
+        if(_currentScheduleNumber == 0)
+        {
+            return outputText;
+        }
+        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
+
+        switch (currentSchedule.SchedulingResult.Status)
+        {
+            case CpSolverStatus.Optimal:
+                outputText += "Solution(Optimal): <br />";
+                break;
+            case CpSolverStatus.Feasible:
+                outputText += "Solution(Feasible): <br />";
+                break;
+            default:
+                outputText += "No schedule can be generated with given requirments <br />";
+                break;
+        }
+
+        outputText += $"Number of shift requests met = {currentSchedule.PreferencesCount.Sum() -  currentSchedule.UnsatisfiedPreferencesCount.Sum()} (out of {currentSchedule.PreferencesCount.Sum()}).<br />";
+        return outputText;
+    }
+
+    private Schedule CreateNewSchedule()
+    {
+        Schedule schedule = new Schedule();
+        if (_keepRequirments)
+        {
+            schedule.ShiftPreferences = (bool[,,])_newSchedule.ShiftPreferences.Clone();
+            schedule.UnavailabilityRequests = (bool[,,])_newSchedule.UnavailabilityRequests.Clone();
+            schedule.PreferencesCount = (int[])_newSchedule.PreferencesCount.Clone();
+            schedule.UnavailabilityCount = (int[])_newSchedule.UnavailabilityCount.Clone();
+        }
+        schedule.UnsatisfactionStreak = (int[])_newSchedule.UnsatisfactionStreak.Clone();
+        return schedule;
+    }
+
+    private string GetTextForUnsatisfiedPreferences(int e)
+    {
+        string output = "";
+        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
+        if(currentSchedule.UnsatisfiedPreferencesCount[e] != 0)
+        {
+            output += $"(unsatisfied preferences : {currentSchedule.UnsatisfiedPreferencesCount[e]})";
+        }
+        return output;
+
+    }
+
+    private int[] GetPreferencesPriority()
+    {
+        int[] priorityCoef = new int[SchedulingService.NumEmployees];
+        Schedule lastSchedule = schedules.Count == 0 ? new Schedule() : schedules[schedules.Count - 1];
+        for (int e = 0; e < SchedulingService.NumEmployees; e++)
+        {
+            if (lastSchedule.UnsatisfiedPreferencesCount[e] == 0)
+            {
+                priorityCoef[e] = 1;
+            }
+            else
+            {
+                priorityCoef[e] = lastSchedule.UnsatisfiedPreferencesCount[e] * 2;
+            }
+            priorityCoef[e] *= SchedulingService.MaxNumberOfRequirments - _newSchedule.PreferencesCount[e] + 1;
+            priorityCoef[e] += lastSchedule.UnsatisfactionStreak[e];
+        }
+        return priorityCoef;
+    }
+}
+

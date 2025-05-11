@@ -1,0 +1,100 @@
+﻿.schedule-table {
+    border-collapse: collapse;
+    width: 100%;
+    border: 1px solid black;
+}
+
+.withBottomSpace {
+    margin-bottom: 20px;
+}
+
+th, td {
+    border: 1px solid black;
+    padding: 10px;
+    text-align: center;
+    user-select: none;
+}
+
+.subcell-container {
+    display: flex;
+    flex-direction: column; /* use row for side-by-side */
+    height: 100%;
+}
+
+.subcell {
+    flex: 1;
+    border-top: 1px solid #ccc;
+    padding: 5px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.subcell:first-child {
+    border-top: none; /* avoid double border on top */
+}
+
+.preferred{
+    background-color:lightgreen
+}
+
+.unavailable{
+    background-color:lightcoral
+}
+
+.scheduled{
+    background-color:lightcyan
+}
+
+.scheduledPreferred {
+    background-color: lightcyan;
+    border-left: 3px solid green;
+}
+
+.page-layout {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 10px 20px;
+    margin-bottom: 20px;
+}
+
+.left-text {
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.spacer {
+    flex: 1;
+}
+
+.number-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 20px;
+    justify-content: center; /* ✅ Horizontally centers the content */
+}
+
+.arrow-button {
+    padding: 4px 8px;
+    font-size: 16px;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    background-color: white;
+    border-radius: 4px;
+    width: 32px;
+    height: 32px;
+}
+
+.arrow-button:hover {
+    background-color: #f0f0f0;
+}
+
+.preferredNotScheduled {
+    border-left: 3px solid green;
+}
+
+.unavailableNotPreferred {
+    border-left: 3px solid red;
+}
+
