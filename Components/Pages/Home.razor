@@ -310,14 +310,18 @@
     private bool _isTesting = false;
     private List<string> _chartTypes;
     private string _axisTitle = "";
+    private Schedule _startSchedule;
 
     protected override void OnInitialized()
     {
         _newSchedule = new Schedule();
+        _startSchedule = new Schedule();
         base.OnInitialized();
         LoadSchedulesPerSession();
         SetChartTypes();
         _newSchedule.Name = $"Week {_schedules.Count + 1}";
+        _startSchedule.Name = $"Week {_schedules.Count + 0}";
+        _startSchedule.NextPriority = GetPreferencesPriority(_startSchedule, true);
     }
 
     private void SetChartTypes()
@@ -353,7 +357,7 @@
     private void Generate()
     {
         _newSchedule.Name = $"Week {_schedules.Count + 1}";
-        
+
         //Set preferences priority
         int[] preferencesPriority = new int[SchedulingService.NumEmployees];
         if (_schedules.Count > 0)
@@ -362,7 +366,7 @@
         }
         else
         {
-            preferencesPriority = GetPreferencesPriority(_newSchedule, true);
+            preferencesPriority = _startSchedule.NextPriority;
         }
 
         //Apply coef to preferences
@@ -471,9 +475,9 @@
             }
         }
 
+
         //Count future priority
         _newSchedule.NextPriority = GetPreferencesPriority(_newSchedule, false);
-
         //Save the schedule
         AddSchedule(_newSchedule);
 
@@ -669,7 +673,7 @@
             Schedule currentSchedule = _schedules[_currentScheduleNumber - 1];
             if (currentSchedule.UnsatisfiedPreferencesCount[e] != 0)
             {
-               // output += $"(unsatisfaction percentage : {currentSchedule.UnsatisfactionPercentage[e]}%)";
+                // output += $"(unsatisfaction percentage : {currentSchedule.UnsatisfactionPercentage[e]}%)";
             }
         }
         if(SchedulingService.AllEmployees[e].Role == Role.Manager)
@@ -772,12 +776,19 @@
 
     private void ComparePriorities()
     {
-        Schedule compareSchedule = new Schedule();
+        if (string.IsNullOrEmpty(_chosenScheduleName))
+        {
+            return;
+        }
+        Schedule compareSchedule = _startSchedule;
         for (int i = 0; i < _schedules.Count; i++)
         {
-            if(_schedules[i].Name == _chosenScheduleName && i >= 1)
+            if(_schedules[i].Name == _chosenScheduleName)
             {
-                compareSchedule = _schedules[i - 1];
+                if (i >= 1)
+                {
+                    compareSchedule = _schedules[i - 1];
+                }
             }
         }
         string explanation = priorityAnalysysService.Evaluate(_compareFrom, _compareTo, compareSchedule);
