@@ -1,0 +1,18 @@
+﻿@page "/reset-system"
+@using SchedulingWebApp.Models
+@using SchedulingWebApp.Services
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<h3>System Reset</h3>
+
+<p>This will clear all scheduling data and reset the system to its default state.</p>
+
+<button class="btn btn-danger" @onclick="SystemReset">Reset the System</button>
+
+@code {
+    private void SystemReset()
+    {
+        SchedulingService.RestoreToDefault();
+        Schedule.ResetParameters();
+    }
+}

@@ -1,0 +1,62 @@
+﻿@page "/edit-employees"
+@using SchedulingWebApp.Models
+@using SchedulingWebApp.Services
+@using SchedulingWebApp.Services.Interfaces
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@code {
+    private int employeeCount;
+    private Role defaultRole = Role.Employee; // Replace with your actual default role
+
+    protected override void OnInitialized()
+    {
+        if (SchedulingService.AllEmployees == null)
+        {
+            SchedulingService.AllEmployees = new List<Employee>();
+        }
+
+        employeeCount = SchedulingService.AllEmployees.Count;
+    }
+
+    private void UpdateEmployeeList()
+    {
+        int currentCount = SchedulingService.AllEmployees.Count;
+
+        if (employeeCount > currentCount)
+        {
+            for (int i = currentCount; i < employeeCount; i++)
+            {
+                SchedulingService.NumEmployees = employeeCount;
+                SchedulingService.AllEmployees.Add(new Employee($"Employee {i + 1}", defaultRole, i));
+            }
+        }
+        else if (employeeCount < currentCount)
+        {
+            SchedulingService.NumEmployees = employeeCount;
+            SchedulingService.AllEmployees.RemoveRange(employeeCount, currentCount - employeeCount);
+        }
+
+        StateHasChanged();
+    }
+}
+
+<h3>Edit Employees</h3>
+
+<div>
+    <label>Number of Employees: </label>
+    <input type="number" @bind="employeeCount" min="0" />
+    <button class="btn btn-primary" @onclick="UpdateEmployeeList">Apply</button>
+</div>
+
+@if (SchedulingService.AllEmployees.Count > 0)
+{
+    <h4>Employee List</h4>
+    @for (int i = 0; i < SchedulingService.AllEmployees.Count; i++)
+    {
+        <div class="mb-2">
+            <label>Employee @(@i + 1): </label>
+            <input type="text" @bind="SchedulingService.AllEmployees[i].Name" readonly />
+        </div>
+    }
+}
+

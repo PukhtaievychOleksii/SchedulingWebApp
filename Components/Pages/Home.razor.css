@@ -2,6 +2,7 @@
     border-collapse: collapse;
     width: 100%;
     border: 1px solid black;
+    margin-bottom: 50px;
 }
 
 .withBottomSpace {
@@ -98,3 +99,37 @@ th, td {
     border-left: 3px solid red;
 }
 
+.chat-bubble {
+    padding: 0.5rem 1rem;
+    border-radius: 10px;
+    max-width: 70%;
+    word-wrap: break-word;
+    overflow-wrap: break-word; /* ensures breaking long words */
+    white-space: pre-wrap; /* preserves line breaks and wraps long lines */
+    word-break: break-word; /* forces breaking if needed */
+    box-sizing: border-box; /* ensures padding is included in width */
+}
+
+
+    .chat-bubble.User {
+        background-color: #e0f7fa;
+        align-self: flex-end;
+    }
+
+    .chat-bubble.Assistant {
+        background-color: #f1f8e9;
+        align-self: flex-start;
+    }
+
+.chat-message-container {
+    display: flex;
+    margin-bottom: 0.5rem;
+}
+
+    .chat-message-container.User {
+        justify-content: flex-start;
+    }
+
+    .chat-message-container.Assistant {
+        justify-content: flex-end;
+    }

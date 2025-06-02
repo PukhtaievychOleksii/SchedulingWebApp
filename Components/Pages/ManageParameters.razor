@@ -1,0 +1,174 @@
+﻿@page "/manage-schedule-parameters"
+@using Radzen
+@using Radzen.Blazor
+@using SchedulingWebApp.Components.Pages
+@using SchedulingWebApp.Models
+@using SchedulingWebApp.Services
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<h2>Manage Schedule Parameters</h2>
+
+@if (showParameterModal)
+{
+    <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="background: white; width: 400px; margin: 10% auto; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <h4>New Schedule Parameter</h4>
+
+            <RadzenTemplateForm Data="@newParameter" Submit="@((ScheduleParameter param) => { SaveNewParameter(param); })">
+                <RadzenTextBox @bind-Value="newParameter.Name" Placeholder="Name" Style=@($"width: 100%; margin-bottom: 1rem; {(emptyName ? "background-color: rgba(255, 0, 0, 0.1);" : "")}") />
+                <RadzenNumeric TValue="int" @bind-Value="newParameter.MinValue" Placeholder="Min Value" Style=@($"width: 100%; margin-bottom: 1rem; {(wrongLimits ? "background-color: rgba(255, 0, 0, 0.1);" : "")}") />
+                <RadzenNumeric TValue="int" @bind-Value="newParameter.MaxValue" Placeholder="Max Value" Style=@($"width: 100%; margin-bottom: 1rem; {(wrongLimits ? "background-color: rgba(255, 0, 0, 0.1);" : "")}") />
+
+                <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Secondary" Click="@CloseWindow" />
+                    <RadzenButton Text="Save" ButtonType="ButtonType.Submit" />
+                </div>
+            </RadzenTemplateForm>
+        </div>
+    </div>
+}
+
+
+<div style="display: flex; gap: 2rem; align-items: flex-start; margin-top: 3rem;">
+    <!-- Left column: Schedule Parameters -->
+    <div style="flex: 1;">
+        <RadzenButton Text="Add New Schedule Parameter" Icon="add_circle" Style="margin-bottom: 1rem;" Click="@AddParameter" />
+
+        <RadzenDataGrid Data="@scheduleParameters" @ref="scheduleGrid" TItem="ScheduleParameter" RowSelect="OnParameterSelected">
+            <Columns>
+                <RadzenDataGridColumn TItem="ScheduleParameter" Property="Name" Title="Parameter Name" />
+                <RadzenDataGridColumn TItem="ScheduleParameter" Property="MinValue" Title="Min" />
+                <RadzenDataGridColumn TItem="ScheduleParameter" Property="MaxValue" Title="Max" />
+            </Columns>
+        </RadzenDataGrid>
+    </div>
+
+    <!-- Right column: Employee values -->
+    <div style="flex: 1;">
+        @if (selectedParameter != null)
+        {
+            <h4>Values for: @selectedParameter.Name</h4>
+            <RadzenDataGrid Data="@employees" TItem="Employee">
+                <Columns>
+                    <RadzenDataGridColumn TItem="Employee" Property="Name" Title="Employee Name" />
+                    <RadzenDataGridColumn TItem="Employee" Title="Value">
+                        <Template Context="employee">
+                            <RadzenNumeric TValue="int" @bind-Value="employeeParameterValues[employee.Index]"
+                                           Min="@selectedParameter.MinValue" Max="@selectedParameter.MaxValue"
+                                           Style="width: 100px;" />
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+
+            <RadzenButton Text="Save"
+                          Icon="save"
+                          Size="ButtonSize.Small"
+                          ButtonStyle="ButtonStyle.Primary"
+                          Click="@OnSave"
+                          Style="margin-top: 1rem;" />
+        }
+        else
+        {
+            <p>Select a parameter to assign values to employees.</p>
+        }
+    </div>
+</div>
+
+@code {
+
+    List<ScheduleParameter> scheduleParameters;
+    List<Employee> employees = SchedulingService.AllEmployees;
+
+    RadzenDataGrid<ScheduleParameter> scheduleGrid;
+    int[] employeeParameterValues;
+    ScheduleParameter? selectedParameter;
+    bool showParameterModal = false;
+    ScheduleParameter newParameter = new("", 0, 100);
+    bool wrongLimits = false;
+    bool emptyName = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        LoadSessionData();
+    }
+
+    void OnParameterSelected(ScheduleParameter parameter)
+    {
+        selectedParameter = parameter;
+        if (Schedule.GlobalScheduleParameters.ContainsKey(selectedParameter))
+        {
+            var values = Schedule.GlobalScheduleParameters[selectedParameter];
+            employeeParameterValues = values;
+        }
+        else
+        {
+            return;
+        }
+    }
+
+    public void AddParameter()
+    {
+        newParameter = new ScheduleParameter("", 0, 100);
+        showParameterModal = true;
+    }
+
+    void SaveNewParameter(ScheduleParameter submittedParameter)
+    {
+        if (!string.IsNullOrWhiteSpace(newParameter.Name))
+        {
+            if (CheckLimitation())
+            {
+                int[] defaultValues = new int[SchedulingService.NumEmployees];
+                for(int i = 0; i <  SchedulingService.NumEmployees; i++)
+                {
+                    defaultValues[i] = submittedParameter.MinValue;
+                }
+                Schedule.GlobalScheduleParameters.Add(submittedParameter, defaultValues);
+                showParameterModal = false;
+                scheduleParameters = Schedule.GlobalScheduleParameters.Select(x => x.Key).ToList();
+                scheduleGrid?.Reload();
+                wrongLimits = false;
+            }
+            else
+            {
+                wrongLimits = true;
+            }
+            emptyName = false;
+        }
+        else
+        {
+            emptyName = true;
+        }
+    }
+
+    void CloseWindow()
+    {
+        showParameterModal = false;
+        wrongLimits = false;
+        emptyName = false;
+    }
+
+    void OnSave()
+    {
+        Schedule.GlobalScheduleParameters[selectedParameter] = employeeParameterValues;
+    }
+
+    private void LoadSessionData()
+    {
+        scheduleParameters = Schedule.GlobalScheduleParameters.Select(x => x.Key).ToList();
+    }
+
+    private bool CheckLimitation()
+    {
+        if(newParameter.MinValue > newParameter.MaxValue)
+        {
+            return false;
+        }
+        if(newParameter.MinValue <= 0 && newParameter.MaxValue <= 0 || newParameter.MinValue >= 0 && newParameter.MaxValue >= 0)
+        {
+            return true;            
+        }
+        return false;
+    }
+}

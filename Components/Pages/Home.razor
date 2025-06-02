@@ -3,47 +3,107 @@
 @using Google.OrTools.Sat
 @using SchedulingWebApp.Models
 @using SchedulingWebApp.Services
+@using SchedulingWebApp.Services.Interfaces
 @inject ISchedulingService schedulingService 
+@inject IAIService aiService
+@inject IPriorityAnalysysService priorityAnalysysService
+@inject IChartService chartService
+@inject ITestingService testingService
+@implements IDisposable
 
 <PageTitle>Home</PageTitle>
+
+@if(_showTesting){
+<div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="background: white; width: 400px; margin: 10% auto; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+        <h4>Testing Engine</h4>
+        <p>Set number of schedules generated per test:</p>
+        <RadzenNumeric TValue="int" @bind-Value="_schedulesPerTest" Placeholder="Min Value" Style="width: 100%; margin-bottom: 1rem;" />
+            <table style="width: 100%; border-collapse: collapse; font-family: sans-serif;">
+                <tbody>
+                    <tr>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            Tests run
+                        </td>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            @_totalTestsRun
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            Schedules generated
+                        </td>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            @_totalTestingSchedulesGenerated
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            Maximum dissatisfaction streak achieved
+                        </td>
+                        <td style="padding: 12px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; text-align: left;">
+                            @_maxDissatisfactionStreakInTests
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top:20px;">
+            <RadzenButton Text="Load results" Click="@GetTestingResults" Style="background-color: #ccc; color: black;" Disabled="@(_isTesting == false)"/>
+            <RadzenButton Text="Stop" ButtonStyle="ButtonStyle.Secondary" Click="@StopTesting" />
+            <RadzenButton Text="Start" Click="@StartTesting" Disabled="@_isTesting"/>
+        </div>
+    </div>
+</div>
+}
 
 <div class="page-layout">
     <h1>Your scheduler!</h1>
 
     <div class="spacer"></div>
 
-    <InputCheckbox @bind-Value="_keepRequirments" />
-    <label>Keep Requirements</label>
+    <div style="margin-right:0.5rem;">
+        <InputCheckbox @bind-Value="_keepRequirments" />
+        <label>Keep Requirements</label>
+    </div>
+
+    <div>
+        <InputCheckbox @bind-Value="_isTestingAllowed" />
+        <label>Allow testing</label>
+    </div>
 
 </div>
 
+<h3>Plan a schedule for @_newSchedule.Name</h3>
 <table class="schedule-table withBottomSpace">
     <thead>
         <tr>
             <th>&nbsp;</th>
-            @foreach(int d in SchedulingService.AllDays)
+            @foreach(Day day in SchedulingService.AllDays)
             {
-                <th>Day @(d + 1)</th>
+                <th>@day.Name</th>
             }
         </tr>
     </thead>
 
     <tbody>
-        @foreach(int e in SchedulingService.AllEmployees)
+        @foreach(Employee e in SchedulingService.AllEmployees)
         {
             <tr>
-                <th>Employee @(e + 1)</th>
-                @foreach(int d in SchedulingService.AllDays)
+                <th>
+                    @e.Name<br />
+                <span style="font-weight: normal; font-size: smaller;">@GetEmployeeText(e.Index)</span>
+                </th>
+                @foreach (Day d in SchedulingService.AllDays)
                 {
                     <td>
                         <div class="subcell-container">
-                            @foreach(int s in SchedulingService.AllShifts)
+                            @foreach(Shift s in SchedulingService.AllShifts)
                             {
                                <div 
-                                   class="subcell @(IsPreferred(e, d, s) ? " preferred" : "") @(IsUnavailable(e, d, s) ? " unavailable" : "")"
-                                   @onclick="() => ChangePreferredStatus(e, d, s)"
-                                   @ondblclick="() => ChangeUnavailableStatus(e, d, s)"
-                               > Shift @(s + 1)</div>
+                                   class="subcell @(IsPreferred(e.Index, d.Index, s.Index) ? " preferred" : "") @(IsUnavailable(e.Index, d.Index, s.Index) ? " unavailable" : "")"
+                                   @onclick="() => ChangePreferredStatus(e.Index, d.Index, s.Index)"
+                                   @ondblclick="() => ChangeUnavailableStatus(e.Index, d.Index, s.Index)"
+                               > @s.Name</div>
                             }
                             
                         </div>
@@ -59,10 +119,10 @@
 </button>
 
 
-@if (schedules.Count != 0)
+@if (_schedules.Count != 0)
 {
     <div class="page-layout">
-        <h2 class="withBottomSpace">Schedule for week @_currentScheduleNumber</h2>
+        <h2 class="withBottomSpace">@GetCurrentScheduleName()</h2>
 
         <div class="spacer"></div> 
 
@@ -78,35 +138,33 @@
         <thead>
             <tr>
                 <th>&nbsp;</th>
-                @foreach (int d in SchedulingService.AllDays)
+                @for (int d = 0; d < SchedulingService.NumDays; d++)
                 {
-                    <th>Day @(d + 1)</th>
+                    <th>@SchedulingService.AllDays[d].Name</th>
                 }
             </tr>
         </thead>
 
         <tbody>
-            @foreach (int e in SchedulingService.AllEmployees)
+            @for (int e = 0; e < SchedulingService.NumEmployees; e++)
             {
                 <tr>
 
                     <th style="text-align: center;">
-                        Employee @(e + 1)<br />
-                        <span style="font-weight: normal; font-size: smaller;">@GetTextForUnsatisfiedPreferences(e)</span>
+                        @SchedulingService.AllEmployees[e].Name<br />
+                        <span style="font-weight: normal; font-size: smaller;">@GetEmployeeText(e)</span>
                     </th>
 
-                    @foreach (int d in SchedulingService.AllDays)
+                    @for (int d = 0; d < SchedulingService.NumDays; d++)
                     {
                         <td>
                             <div class="subcell-container">
-                                @foreach (int s in SchedulingService.AllShifts)
+                                @for (int s = 0; s < SchedulingService.NumShifts; s++)
                                 {
-                                    <div class="subcell @GetCurrentScheduleStyle(e,d,s)"
-                                         >
-                                        Shift @(s + 1)
+                                    <div class="subcell @GetCurrentScheduleStyle(e,d,s)">
+                                        @SchedulingService.AllShifts[s].Name;
                                     </div>
                                 }
-
                             </div>
                         </td>
                     }
@@ -115,32 +173,197 @@
         </tbody>
     </table>
 
+    <div style="display: flex; padding:2rem; height:500px; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; overflow: hidden;">
+            <RadzenCard Style
+            ="width:100%;">
+
+            <div style="display: flex;justify-content: space-between;align-items: center;width: 100%; padding:1rem;">
+                <RadzenDropDown Data="@SchedulingService.AllEmployees"
+                TextProperty="Name"
+                @bind-Value="@_employeeForChart"
+                Placeholder="Select an employee"
+                Style="width: 30%;"
+                />
+
+                <RadzenDropDown Data="_chartTypes"
+                                @bind-Value="@_chartType"
+                                Placeholder="Select chart type"
+                                Style="width: 30%;" />
+
+                <button class="btn btn-primary" @onclick="@ShowChart">
+                    Show
+                </button>
+        </div>
+            @if (_showChart)
+            {
+            <RadzenChart>
+                    <RadzenAreaSeries Smooth="false" Data="@_chartData" CategoryProperty="ScheduleName" ValueProperty="Value" RenderingOrder="1" Title="">
+                        <RadzenSeriesDataLabels Visible="true"/>
+                        <RadzenMarkers Visible="true" MarkerType="MarkerType.Circle" />
+                    </RadzenAreaSeries>
+                    <RadzenCategoryAxis Padding="20" />
+                    <RadzenValueAxis>
+                        <RadzenGridLines Visible="true" />
+                        <RadzenAxisTitle Text=@_axisTitle />
+                    </RadzenValueAxis>
+            </RadzenChart>
+            }
+        </RadzenCard>
+    </div>
+
+    <div style="display: flex; gap: 4rem; padding: 0 2rem; height:500px">
+        <div style="display: flex;flex-direction: column;gap: 1rem; flex: 1; width: 35%; min-width: 0; max-width: 35%; box-sizing: border-box; overflow: hidden;">
+            <RadzenCard Style="@GetCardStyle()">
+                @if (_communicationHistory.Count == 0)
+                {
+                    <div style="text-align: center; color: #999;">No messages yet. Start a conversation.</div>
+                }
+                else
+                {
+                    @foreach (var message in _communicationHistory)
+                    {
+                        <div class="chat-message-container @(message.Role.ToString())">
+                            <div class="chat-bubble @(message.Role.ToString())">
+                                <strong>@(message.Role.ToString() == "User" ? "You" : "AI"):</strong> @message.Content
+                            </div>
+                        </div>
+                    }
+                }
+            </RadzenCard>
+
+            <RadzenTextBox @bind-Value="_userInput" Placeholder="Type your message..." Style="width: 100%; margin-top: 1rem;" />
+
+            <button style="align-self: flex-start;" class="btn btn-primary" disabled="@_isSending" @onclick="SendMessageToAI">
+                Send
+            </button>
+        </div>
+
+        <div style="display: flex;flex-direction: column;gap: 1rem; flex: 1; height:60%; width: 65%; min-width: 0; max-width: 65%; box-sizing: border-box; overflow: hidden;">
+            <RadzenCard Style="height: 300px; overflow-y: auto; padding: 1rem;   border: 1px solid #ccc;">
+                <div style="display: flex;justify-content: space-between;align-items: center;width: 100%; padding:1rem;">
+                    <RadzenDropDown Data="@SchedulingService.AllEmployees"
+                                    TextProperty="Name"
+                                    @bind-Value="@_compareFrom"
+                                    Placeholder="Select first option"
+                                    Style="width: 30%; height: 10%; " />
+
+                    <RadzenDropDown Data="@SchedulingService.AllEmployees"
+                                    TextProperty="Name"
+                                    @bind-Value="@_compareTo"
+                                    Placeholder="Select second option"
+                                    Style="width: 30%; height: 10%" />
+
+                    <RadzenDropDown Data="@_schedules.Select(x => x.Name).ToList()"
+                                    @bind-Value="@_chosenScheduleName"
+                                    Placeholder="Select schedule"
+                                    Style="width: 30%; height: 10%" />
+                </div>
+                    <div style="border: 1px solid #ccc; padding: 0.5rem; margin-top: 0.5rem; min-height: 60px; background-color: #f9f9f9;">
+                        @_analysysResult
+                    </div>
+            </RadzenCard>
+
+            
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                <button class="btn btn-primary" @onclick="ComparePriorities">
+                    Compare
+                </button>
+            </div>
+        </div>
+    </div>
     
+}
+
+@if (_isTestingAllowed)
+{
+    <div style="text-align: right;">
+        <RadzenButton Text="Testing" Click="@(() => _showTesting = true)" />
+    </div>
 }
 
 
 @code {
-    private List<Schedule> schedules;
-    private Schedule _previousSchedule;
+    private List<Schedule> _schedules;
     private Schedule _newSchedule;
     private int _currentScheduleNumber = 0;
     private bool _isDisabledPrevious = true;
     private bool _isDisabledNext = true;
+    private bool _isSending = false;
+    private bool _isTestingAllowed = false;
+    private bool _showTesting = false;
     private bool _keepRequirments = true;
+    private string _userInput = "";
+    private Employee _compareFrom;
+    private Employee _compareTo;
+    private Employee _employeeForChart;
+    private string _chosenScheduleName;
+    private List<Message> _communicationHistory = new List<Message>();
+    private string _analysysResult = "";
+    private List<DataItem> _chartData = new List<DataItem>();
+    private bool _showChart = false;
+    private string _chartType;
+    private int _schedulesPerTest = 0;
+    private int _totalTestsRun = 0;
+    private int _totalTestingSchedulesGenerated = 0;
+    private int _maxDissatisfactionStreakInTests = 0;
+    private bool _isTesting = false;
+    private List<string> _chartTypes;
+    private string _axisTitle = "";
 
     protected override void OnInitialized()
     {
-        base.OnInitialized();
-        schedules = new List<Schedule>();
-        _previousSchedule = new Schedule();
         _newSchedule = new Schedule();
+        base.OnInitialized();
+        LoadSchedulesPerSession();
+        SetChartTypes();
+        _newSchedule.Name = $"Week {_schedules.Count + 1}";
+    }
+
+    private void SetChartTypes()
+    {
+        _chartTypes = new List<string>() {
+            nameof(_newSchedule.UnsatisfactionPercentage),
+            nameof(_newSchedule.SatisfiedPreferencesCount),
+            nameof(_newSchedule.UnsatisfiedPreferencesCount),
+            nameof(_newSchedule.UnsatisfactionStreak)
+        };
+        foreach (ScheduleParameter parameter in Schedule.GlobalScheduleParameters.Keys)
+        {
+            _chartTypes.Add(parameter.Name);
+        }
+    }
+    private void LoadSchedulesPerSession()
+    {
+        _schedules = SchedulingService.Schedules;
+        if(_schedules.Count > 0)
+        {
+            SetCurrentScheduleNumber(_schedules.Count);
+        }
+
+        _keepRequirments = SchedulingService.KeepRequirments;
+        if (_keepRequirments)
+        {
+            // _newSchedule.ShiftPreferences = SchedulingService.Preferences;
+            // _newSchedule.UnavailabilityRequests = SchedulingService.Unavailability;
+        }
+        StateHasChanged();
     }
 
     private void Generate()
     {
-
+        _newSchedule.Name = $"Week {_schedules.Count + 1}";
+        
         //Set preferences priority
-        int[] preferencesPriority = GetPreferencesPriority();
+        int[] preferencesPriority = new int[SchedulingService.NumEmployees];
+        if (_schedules.Count > 0)
+        {
+            preferencesPriority = _schedules.Last().NextPriority;
+        }
+        else
+        {
+            preferencesPriority = GetPreferencesPriority(_newSchedule, true);
+        }
 
         //Apply coef to preferences
         int[,,] preferencesWithCoef = new int[SchedulingService.NumEmployees, SchedulingService.NumDays, SchedulingService.NumShifts];
@@ -158,12 +381,12 @@
 
         //Count total preferences
         int[] numberOfPreferences = new int[SchedulingService.NumEmployees];
-        foreach (int e in SchedulingService.AllEmployees)
+        for (int e = 0; e < SchedulingService.NumEmployees; e++)
         {
             int totalPreferences = 0;
-            foreach (int d in SchedulingService.AllDays)
+            for (int d = 0; d < SchedulingService.NumDays; d++)
             {
-                foreach (int s in SchedulingService.AllShifts)
+                for (int s = 0; s < SchedulingService.NumShifts; s++)
                 {
                     if (_newSchedule.ShiftPreferences[e, d, s])
                     {
@@ -173,11 +396,15 @@
             }
             numberOfPreferences[e] = totalPreferences;
         }
-        _newSchedule.PreferencesCount = numberOfPreferences;
+        _newSchedule.TotalPreferencesCount = numberOfPreferences;
+
+        //Save parameters' values
+        _newSchedule.MakeParametersSnapshot();
 
         //Create Schedule
         SchedulingResult schedulingResult = schedulingService.Generate(preferencesWithCoef, _newSchedule.UnavailabilityRequests);
         _newSchedule.SchedulingResult = schedulingResult;
+
 
         if (schedulingResult.Status != CpSolverStatus.Optimal && schedulingResult.Status != CpSolverStatus.Feasible)
         {
@@ -187,41 +414,53 @@
         }
 
 
-        //Count unsatisfied preferences
+        //Count unsatisfied/satisfied preferences
         int[] unsatisfiedPreferencesCount = new int[SchedulingService.NumEmployees];
-
-        foreach (int e in SchedulingService.AllEmployees)
+        int[] satisfiedPreferencesCount = new int[SchedulingService.NumEmployees];
+        for (int e = 0; e < SchedulingService.NumEmployees; e++)
         {
             int unsatisfiedPreferences = 0;
-            foreach (int d in SchedulingService.AllDays)
+            for (int d = 0; d < SchedulingService.NumDays; d++)
             {
-                foreach (int s in SchedulingService.AllShifts)
+                for (int s = 0; s < SchedulingService.NumShifts; s++)
                 {
-                    if (_newSchedule.SchedulingResult.ShiftsAssingment[e, d, s] == false && _newSchedule.ShiftPreferences[e, d, s])
+                    if (_newSchedule.SchedulingResult.ShiftsAssingment[e, d, s] == false &&
+                        _newSchedule.ShiftPreferences[e, d, s])
                     {
                         unsatisfiedPreferences++;
                     }
                 }
             }
             unsatisfiedPreferencesCount[e] = unsatisfiedPreferences;
+            satisfiedPreferencesCount[e] = numberOfPreferences[e] - unsatisfiedPreferences;
         }
-
+        _newSchedule.SatisfiedPreferencesCount = satisfiedPreferencesCount;
         _newSchedule.UnsatisfiedPreferencesCount = unsatisfiedPreferencesCount;
 
-        //Count unsatisfaction streak
-        if(schedules.Count == 0)
+        //Count unsatisfaction percentage 
+        int[] unsatisfactionPercentage = new int[SchedulingService.NumEmployees];
+        for (int e = 0; e < SchedulingService.NumEmployees; e++)
         {
-            foreach(int e in SchedulingService.AllEmployees)
+            if(_newSchedule.TotalPreferencesCount[e] == 0)
             {
-                _newSchedule.UnsatisfactionStreak[e] = _newSchedule.UnsatisfiedPreferencesCount[e] != 0 ? 1 : 0;
-            }   
+                unsatisfactionPercentage[e] = 0;
+            }
+            else
+            {
+                double var1 = _newSchedule.UnsatisfiedPreferencesCount[e];
+                double var2 = _newSchedule.TotalPreferencesCount[e];
+                unsatisfactionPercentage[e] =  (int)(var1 / var2 * 100);
+            }
         }
-        else
+        _newSchedule.UnsatisfactionPercentage = unsatisfactionPercentage;
+
+        //Count unsatisfaction streak
+        if(_schedules.Count > 0)
         {
-            Schedule previousSchedule = schedules.Last();
-            foreach(int e in SchedulingService.AllEmployees)
+            Schedule previousSchedule = _schedules.Last();
+            for (int e = 0; e < SchedulingService.NumEmployees; e++)
             {
-                if(previousSchedule.UnsatisfiedPreferencesCount[e] <= _newSchedule.UnsatisfiedPreferencesCount[e] && _newSchedule.UnsatisfiedPreferencesCount[e] > 0)
+                if(previousSchedule.UnsatisfactionPercentage[e] <= _newSchedule.UnsatisfactionPercentage[e] && previousSchedule.UnsatisfactionPercentage[e] > 0)
                 {
                     _newSchedule.UnsatisfactionStreak[e]++;
                 }
@@ -232,9 +471,16 @@
             }
         }
 
+        //Count future priority
+        _newSchedule.NextPriority = GetPreferencesPriority(_newSchedule, false);
 
         //Save the schedule
         AddSchedule(_newSchedule);
+
+        //SetAIContext
+        aiService.SaveScheduleContext(_newSchedule);
+
+        //Reset
         _newSchedule = CreateNewSchedule();
 
     }
@@ -255,16 +501,16 @@
         {
             if(!_newSchedule.ShiftPreferences[e, d, s])
             {
-                if (_newSchedule.PreferencesCount[e] < SchedulingService.MaxNumberOfRequirments)
+                if (_newSchedule.TotalPreferencesCount[e] < SchedulingService.MaxNumberOfRequirments)
                 {
                     _newSchedule.ShiftPreferences[e, d, s] = !_newSchedule.ShiftPreferences[e, d, s];
-                    _newSchedule.PreferencesCount[e]++;
+                    _newSchedule.TotalPreferencesCount[e]++;
                 }
             }
             else
             {
                 _newSchedule.ShiftPreferences[e, d, s] = !_newSchedule.ShiftPreferences[e, d, s];
-                _newSchedule.PreferencesCount[e]--;
+                _newSchedule.TotalPreferencesCount[e]--;
             }
         }
     }
@@ -291,7 +537,7 @@
 
     private string GetCurrentScheduleStyle(int e, int d, int s)
     {
-        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
+        Schedule currentSchedule = _schedules[_currentScheduleNumber - 1];
         if(currentSchedule.SchedulingResult.ShiftsAssingment[e, d, s])
         {
             if(currentSchedule.ShiftPreferences[e, d, s])
@@ -322,7 +568,7 @@
         if(_currentScheduleNumber - 1 > 0){
             _isDisabledPrevious = false;
         }
-        if (_currentScheduleNumber - 1 >= schedules.Count - 1)
+        if (_currentScheduleNumber - 1 >= _schedules.Count - 1)
         {
             _isDisabledNext = true;
         }
@@ -331,7 +577,7 @@
     private void ShowPreviousSchedule()
     {
         _currentScheduleNumber--;
-        if(_currentScheduleNumber - 1 < schedules.Count - 1)
+        if(_currentScheduleNumber - 1 < _schedules.Count - 1)
         {
             _isDisabledNext = false;
         }
@@ -343,7 +589,7 @@
 
     private void SetCurrentScheduleNumber(int scheduleNumber)
     {
-        if(scheduleNumber < 1 || scheduleNumber > schedules.Count)
+        if(scheduleNumber < 1 || scheduleNumber > _schedules.Count)
         {
             return;
         }
@@ -357,7 +603,7 @@
             _isDisabledPrevious = false;
         }
 
-        if(scheduleNumber == schedules.Count)
+        if(scheduleNumber == _schedules.Count)
         {
             _isDisabledNext = true;
         }
@@ -371,8 +617,8 @@
 
     private void AddSchedule(Schedule schedule)
     {
-        schedules.Add(schedule);
-        SetCurrentScheduleNumber(schedules.Count);
+        _schedules.Add(schedule);
+        SetCurrentScheduleNumber(_schedules.Count);
     }
 
     private string GetOuputText()
@@ -382,7 +628,7 @@
         {
             return outputText;
         }
-        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
+        Schedule currentSchedule = _schedules[_currentScheduleNumber - 1];
 
         switch (currentSchedule.SchedulingResult.Status)
         {
@@ -397,7 +643,7 @@
                 break;
         }
 
-        outputText += $"Number of shift requests met = {currentSchedule.PreferencesCount.Sum() -  currentSchedule.UnsatisfiedPreferencesCount.Sum()} (out of {currentSchedule.PreferencesCount.Sum()}).<br />";
+        outputText += $"Number of shift requests met = {currentSchedule.TotalPreferencesCount.Sum() -  currentSchedule.UnsatisfiedPreferencesCount.Sum()} (out of {currentSchedule.TotalPreferencesCount.Sum()}).<br />";
         return outputText;
     }
 
@@ -408,43 +654,211 @@
         {
             schedule.ShiftPreferences = (bool[,,])_newSchedule.ShiftPreferences.Clone();
             schedule.UnavailabilityRequests = (bool[,,])_newSchedule.UnavailabilityRequests.Clone();
-            schedule.PreferencesCount = (int[])_newSchedule.PreferencesCount.Clone();
+            schedule.TotalPreferencesCount = (int[])_newSchedule.TotalPreferencesCount.Clone();
             schedule.UnavailabilityCount = (int[])_newSchedule.UnavailabilityCount.Clone();
         }
         schedule.UnsatisfactionStreak = (int[])_newSchedule.UnsatisfactionStreak.Clone();
         return schedule;
     }
 
-    private string GetTextForUnsatisfiedPreferences(int e)
+    private string GetEmployeeText(int e)
     {
         string output = "";
-        Schedule currentSchedule = schedules[_currentScheduleNumber - 1];
-        if(currentSchedule.UnsatisfiedPreferencesCount[e] != 0)
+        if (_schedules.Count > 0 && _currentScheduleNumber > 0)
         {
-            output += $"(unsatisfied preferences : {currentSchedule.UnsatisfiedPreferencesCount[e]})";
+            Schedule currentSchedule = _schedules[_currentScheduleNumber - 1];
+            if (currentSchedule.UnsatisfiedPreferencesCount[e] != 0)
+            {
+               // output += $"(unsatisfaction percentage : {currentSchedule.UnsatisfactionPercentage[e]}%)";
+            }
+        }
+        if(SchedulingService.AllEmployees[e].Role == Role.Manager)
+        {
+            output += "(manager)";
         }
         return output;
 
     }
 
-    private int[] GetPreferencesPriority()
+    private int[] GetPreferencesPriority(Schedule schedule, bool roleOnly)
     {
         int[] priorityCoef = new int[SchedulingService.NumEmployees];
-        Schedule lastSchedule = schedules.Count == 0 ? new Schedule() : schedules[schedules.Count - 1];
+        Dictionary<ScheduleParameter, int[]> scheduleParameters = Schedule.GlobalScheduleParameters;
         for (int e = 0; e < SchedulingService.NumEmployees; e++)
         {
-            if (lastSchedule.UnsatisfiedPreferencesCount[e] == 0)
+            priorityCoef[e] = 1;
+            priorityCoef[e] += (int)(_newSchedule.RolePercentage[e] * ((double)SchedulingService.PriorityUnit / 100));
+            if (roleOnly)
             {
-                priorityCoef[e] = 1;
+                continue;
+            }
+            if(schedule.UnsatisfactionPercentage[e] != 0)
+            {
+                priorityCoef[e] += (int)(schedule.UnsatisfactionPercentage[e] * ((double)SchedulingService.PriorityUnit / 100));
+            }
+            foreach(ScheduleParameter parameter in scheduleParameters.Keys)
+            {
+                if (scheduleParameters[parameter][e] == 0) continue;
+                int maxValue = parameter.MaxValue;
+                int minValue = parameter.MinValue;
+                if (minValue >= 0 && maxValue >= 0)
+                {
+                    priorityCoef[e] += (int)((double)(scheduleParameters[parameter][e] - minValue) / (maxValue - minValue) * SchedulingService.PriorityUnit);
+                }
+                if(minValue <= 0 && maxValue <= 0)
+                {
+                    priorityCoef[e] -= (int)((double)(scheduleParameters[parameter][e] - maxValue) / (minValue - maxValue) * SchedulingService.PriorityUnit);
+                }
+                if(priorityCoef[e] <= 0)
+                {
+                    priorityCoef[e] = SchedulingService.PriorityUnit / 10;
+                }
+            }
+            priorityCoef[e] += schedule.UnsatisfactionStreak[e] * (SchedulingService.PriorityUnit / 10);
+        }
+
+        return priorityCoef;
+    }
+
+    private async void SendMessageToAI()
+    {
+        if (string.IsNullOrWhiteSpace(_userInput)){
+            return;
+        }
+        _isSending = true;
+        var userMessage = new Message
+            {
+                Role = MessageRole.User,
+                Content = _userInput,
+                Timestamp = DateTime.Now
+            };
+        _communicationHistory.Add(userMessage);
+        try
+        {
+            var aiResponse = await aiService.SendRequestAsync(_userInput, _schedules.Last());
+            var aiMessage = new Message
+                {
+                    Role = MessageRole.Assistant,
+                    Content = aiResponse,
+                    Timestamp = DateTime.Now
+                };
+            _communicationHistory.Add(aiMessage);
+        }
+        finally
+        {
+            _isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetCurrentScheduleName()
+    {
+        if (_currentScheduleNumber >= 1)
+        {
+            return _schedules[_currentScheduleNumber - 1].Name;
+        }
+        return "";
+    }
+
+    private string GetCardStyle()
+    {
+        string style = "height: 300px; overflow-y: auto; padding: 1rem; border: 1px solid #ccc;";
+        if(_communicationHistory.Count == 0)
+        {
+            style += " background-color: #f9f5ff";
+        }
+        return style;
+    }
+
+    private void ComparePriorities()
+    {
+        Schedule compareSchedule = new Schedule();
+        for (int i = 0; i < _schedules.Count; i++)
+        {
+            if(_schedules[i].Name == _chosenScheduleName && i >= 1)
+            {
+                compareSchedule = _schedules[i - 1];
+            }
+        }
+        string explanation = priorityAnalysysService.Evaluate(_compareFrom, _compareTo, compareSchedule);
+        _analysysResult = explanation;
+        StateHasChanged();
+    }
+
+
+
+    private void ShowChart()
+    {
+        _showChart = true;
+        _chartData = new List<DataItem>();
+        int[] values = [];
+
+        foreach(Schedule schedule in _schedules)
+        {
+            int value = -1;
+            if (_chartType == nameof(_newSchedule.UnsatisfactionPercentage))
+            {
+                value = schedule.UnsatisfactionPercentage[_employeeForChart.Index];
+            } else if(_chartType == nameof(_newSchedule.SatisfiedPreferencesCount))
+            {
+                value = schedule.SatisfiedPreferencesCount[_employeeForChart.Index];
+            } else if(_chartType == nameof(_newSchedule.UnsatisfiedPreferencesCount))
+            {
+                value = schedule.UnsatisfiedPreferencesCount[_employeeForChart.Index];
+            } else if(_chartType == nameof(_newSchedule.UnsatisfactionStreak))
+            {
+                value = schedule.UnsatisfactionStreak[_employeeForChart.Index];
             }
             else
             {
-                priorityCoef[e] = lastSchedule.UnsatisfiedPreferencesCount[e] * 2;
+                foreach(ScheduleParameter parameter in Schedule.GlobalScheduleParameters.Keys)
+                {
+                    if(_chartType == parameter.Name)
+                    {
+                        if (schedule.ScheduleParametersSnapshot.ContainsKey(parameter))
+                        {
+                            value = schedule.ScheduleParametersSnapshot[parameter][_employeeForChart.Index];
+                        }
+                        else
+                        {
+                            value = parameter.MinValue;
+                        }
+                        break;
+                    }
+                }
             }
-            priorityCoef[e] *= SchedulingService.MaxNumberOfRequirments - _newSchedule.PreferencesCount[e] + 1;
-            priorityCoef[e] += lastSchedule.UnsatisfactionStreak[e];
+            _chartData.Add(new DataItem(schedule.Name, value));
         }
-        return priorityCoef;
+        _axisTitle = _chartType;
+        StateHasChanged();
+    }
+
+    private void StartTesting()
+    {
+        testingService.Start(schedulingService, _schedulesPerTest);
+        _isTesting = true;
+    }
+
+    private void StopTesting()
+    {
+        testingService.Stop();
+        _showTesting = false;
+        _isTesting = false;
+    }
+
+    private void GetTestingResults()
+    {
+        _totalTestsRun = testingService.GetTotalTests();
+        _totalTestingSchedulesGenerated = testingService.GetTotalSchedules();
+        _maxDissatisfactionStreakInTests = testingService.GetMaxDissatisfactionStreak();
+    }
+
+    public void Dispose()
+    {
+        SchedulingService.SetSchedules(_schedules);
+        SchedulingService.KeepRequirments = _keepRequirments;
+       // SchedulingService.SetPreferences(_newSchedule.ShiftPreferences);
+        //SchedulingService.Unavailability = _newSchedule.UnavailabilityRequests;
     }
 }
 

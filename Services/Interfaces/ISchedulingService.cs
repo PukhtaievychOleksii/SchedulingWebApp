@@ -1,6 +1,6 @@
 ﻿using SchedulingWebApp.Models;
 
-namespace SchedulingWebApp.Services;
+namespace SchedulingWebApp.Services.Interfaces;
 
 public interface ISchedulingService
 {

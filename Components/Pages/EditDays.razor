@@ -1,0 +1,59 @@
+﻿@page "/edit-days"
+@using SchedulingWebApp.Models
+@using SchedulingWebApp.Services
+@using SchedulingWebApp.Services.Interfaces
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@code {
+    private int dayCount;
+
+    protected override void OnInitialized()
+    {
+        if (SchedulingService.AllDays == null)
+        {
+            SchedulingService.AllDays = new List<Day>();
+        }
+
+        dayCount = SchedulingService.AllDays.Count;
+    }
+
+    private void UpdateDayList()
+    {
+        int currentCount = SchedulingService.AllDays.Count;
+
+        if (dayCount > currentCount)
+        {
+            for (int i = currentCount; i < dayCount; i++)
+            {
+                SchedulingService.AllDays.Add(new Day($"Day {i + 1}", i));
+            }
+        }
+        else if (dayCount < currentCount)
+        {
+            SchedulingService.AllDays.RemoveRange(dayCount, currentCount - dayCount);
+        }
+
+        SchedulingService.NumDays = dayCount;
+        StateHasChanged();
+    }
+}
+
+<h3>Edit Days</h3>
+
+<div>
+    <label>Number of Days: </label>
+    <input type="number" @bind="dayCount" min="0" />
+    <button class="btn btn-primary" @onclick="UpdateDayList">Apply</button>
+</div>
+
+@if (SchedulingService.AllDays.Count > 0)
+{
+    <h4>Day List</h4>
+    @for (int i = 0; i < SchedulingService.AllDays.Count; i++)
+    {
+        <div class="mb-2">
+            <label>Day @(@i + 1): </label>
+            <input type="text" @bind="SchedulingService.AllDays[i].Name" readonly />
+        </div>
+    }
+}

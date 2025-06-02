@@ -4,29 +4,60 @@ using System.IO;
 using System.Linq;
 using Google.OrTools.Sat;
 using SchedulingWebApp.Models;
+using SchedulingWebApp.Services.Interfaces;
 namespace SchedulingWebApp.Services;
 
 public class SchedulingService : ISchedulingService
 {
-    public static int NumEmployees { get; private set; }
-    public static int NumDays { get; private set; }
+    public static int NumEmployees { get; set; }
+    public static int NumDays { get;  set; }
     public static int NumShifts { get; private set; }
-    public static int[] AllEmployees { get; private set; }
-    public static int[] AllDays { get; private set; }
-    public static int[] AllShifts { get; private set; }
+    public static List<Employee> AllEmployees { get; set; }
+    public static List<Day> AllDays { get;  set; }
+    public static List<Shift> AllShifts { get; private set; }
     public static int MaxNumberOfRequirments { get; private set;}
+    public static int PriorityUnit { get; private set; }
+    public static List<Schedule> Schedules { get; private set; } = new List<Schedule>();
+
+    public static bool[,,] Preferences = new bool[SchedulingService.NumEmployees, SchedulingService.NumDays, SchedulingService.NumShifts];
+
+    public static bool[,,] Unavailability = new bool[SchedulingService.NumEmployees, SchedulingService.NumDays, SchedulingService.NumShifts];
+
+    public static bool KeepRequirments = true;
 
 
     private readonly int[,,] schedule;
 
-    public SchedulingService(int numEmployees, int numDays, int numShifts, int maxNumOfRequirments) 
+    public SchedulingService(int numEmployees, int numDays, int numShifts, int maxNumOfRequirments, int priorityUnit) 
     {
+        PriorityUnit = priorityUnit;
         NumEmployees = numEmployees;
         NumDays = numDays;
         NumShifts = numShifts;
-        AllEmployees = Enumerable.Range(0, NumEmployees).ToArray();
-        AllDays = Enumerable.Range(0, NumDays).ToArray();
-        AllShifts = Enumerable.Range(0, NumShifts).ToArray();
+        AllEmployees = new List<Employee>();
+
+        AllEmployees.Add(new Employee("Josh", Role.Manager, 0));
+        AllEmployees.Add(new Employee("Maria", Role.Manager, 1));
+        AllEmployees.Add(new Employee("Antony", Role.Employee, 2));
+        AllEmployees.Add(new Employee("Viktor", Role.Employee, 3));
+        AllEmployees.Add(new Employee("Henry", Role.Employee, 4));
+        
+        AllDays = new List<Day>();
+
+        AllDays.Add(new Day("Monday", 0));
+        AllDays.Add(new Day("Tuesday", 1));
+        AllDays.Add(new Day("Wednesday", 2));
+        AllDays.Add(new Day("Thursday", 3));
+        AllDays.Add(new Day("Friday", 4));
+        AllDays.Add(new Day("Saturday", 5));
+        AllDays.Add(new Day("Sunday", 6));
+
+
+        AllShifts = new List<Shift>();
+        for(int s = 0; s < numShifts; s++)
+        {
+            AllShifts.Add(new Shift($"Shift {s + 1}", s));
+        }
         MaxNumberOfRequirments = maxNumOfRequirments;
          
     }
@@ -38,28 +69,28 @@ public class SchedulingService : ISchedulingService
         model.Model.Variables.Capacity = NumEmployees * NumDays * NumShifts;
 
         // Creates shift variables.
-        // shifts[(n, d, s)]: employee 'e' works shift 's' on day 'd'.
+        // shifts[(e, d, s)]: employee 'e' works shift 's' on day 'd'.
         Dictionary<Tuple<int, int, int>, BoolVar> shifts =
             new Dictionary<Tuple<int, int, int>, BoolVar>(NumEmployees * NumDays * NumShifts);
-        foreach (int e in AllEmployees)
+        for (int e = 0; e < NumEmployees; e++)
         {
-            foreach (int d in AllDays)
+            for (int d = 0; d < NumDays; d++)
             {
-                foreach (int s in AllShifts)
+                for (int s = 0; s < NumShifts; s++)
                 {
                     shifts.Add(Tuple.Create(e, d, s), model.NewBoolVar($"shifts_n{e}d{d}s{s}"));
                 }
             }
         }
 
-        // Each shift is assigned to exactly one nurse in the schedule period.
+        // Each shift is assigned to exactly one employee in the schedule period.
         List<ILiteral> literals = new List<ILiteral>();
-        foreach (int d in AllDays)
+        for (int d = 0; d < NumDays; d++)
         {
-            foreach (int s in AllShifts)
+            for (int s = 0; s < NumShifts; s++)
             {
                 IntVar[] assigned_employees = new IntVar[NumEmployees];
-                foreach (int e in AllEmployees)
+                for (int e = 0; e < NumEmployees; e++)
                 {
                     var key = Tuple.Create(e, d, s);
                     assigned_employees[e] = shifts[key];
@@ -69,13 +100,14 @@ public class SchedulingService : ISchedulingService
         }
 
 
+
         // Each employee works at most one shift per day.
-        foreach (int e in AllEmployees)
+        for (int e = 0; e < NumEmployees; e++)
         {
-            foreach (int d in AllDays)
+            for (int d = 0; d < NumDays; d++)
             {
                 IntVar[] assigned_shifts = new IntVar[NumShifts];
-                foreach (int s in AllShifts)
+                for (int s = 0; s < NumShifts; s++)
                 {
                     var key = Tuple.Create(e, d, s);
                     assigned_shifts[s] = shifts[key];
@@ -84,10 +116,8 @@ public class SchedulingService : ISchedulingService
             }
         }
 
-        // Try to distribute the shifts evenly, so that each employee works
-        // minShiftsPerEmployee shifts. If this is not possible, because the total
-        // number of shifts is not divisible by the number of employees, some employees will
-        // be assigned one more shift.
+
+        // Try to distribute the shifts evenly, so that each employee works minShiftsPerEmployee shifts. 
         int minShiftsPerEmployee = (NumShifts * NumDays) / NumEmployees;
         int maxShiftsPerEmployee;
         if ((NumShifts * NumDays) % NumEmployees == 0)
@@ -99,12 +129,12 @@ public class SchedulingService : ISchedulingService
             maxShiftsPerEmployee = minShiftsPerEmployee + 1;
         }
 
-        foreach (int e in AllEmployees)
+        for (int e = 0; e < NumEmployees; e++)
         {
             var shiftsWorked = new IntVar[NumDays * NumShifts];
-            foreach (int d in AllDays)
+            for (int d = 0; d < NumDays; d++)
             {
-                foreach (int s in AllShifts)
+                for (int s = 0; s < NumShifts; s++)
                 {
                     var key = Tuple.Create(e, d, s);
                     shiftsWorked[d * NumShifts + s] = shifts[key];
@@ -113,14 +143,15 @@ public class SchedulingService : ISchedulingService
             model.AddLinearConstraint(LinearExpr.Sum(shiftsWorked), minShiftsPerEmployee, maxShiftsPerEmployee);
         }
 
+
         //Add preferences satisfaction
         IntVar[] flatShifts = new IntVar[NumDays * NumShifts * NumEmployees];
         int[] flatPreferences = new int[NumDays * NumShifts * NumEmployees];
-        foreach (int e in AllEmployees)
+        for (int e = 0; e < NumEmployees; e++)
         {
-            foreach (int d in AllDays)
+            for (int d = 0; d < NumDays; d++)
             {
-                foreach (int s in AllShifts)
+                for (int s = 0; s < NumShifts; s++)
                 {
                     var key = Tuple.Create(e, d, s);
                     flatShifts[e * NumDays * NumShifts + d * NumShifts + s] = shifts[key];
@@ -128,20 +159,21 @@ public class SchedulingService : ISchedulingService
                 }
             }
         }
+
         model.Maximize(LinearExpr.WeightedSum(flatShifts, flatPreferences));
 
         //Add request constraints
         flatShifts = new IntVar[NumDays * NumShifts * NumEmployees];
         int[] flatRequests = new int[NumDays * NumShifts * NumEmployees];
-        foreach (int e in AllEmployees)
+        for (int e = 0; e < NumEmployees; e++)
         {
-            foreach (int d in AllDays)
+            for (int d = 0; d < NumDays; d++)
             {
-                foreach (int s in AllShifts)
+                for (int s = 0; s < NumShifts; s++)
                 {
                     var key = Tuple.Create(e, d, s);
                     flatShifts[e * NumDays * NumShifts + d * NumShifts + s] = shifts[key];
-                    flatRequests[e * NumDays * NumShifts + d * NumShifts + s] = Convert.ToInt32(unavailabilityRequest[e,d,s]);
+                    flatRequests[e * NumDays * NumShifts + d * NumShifts + s] = Convert.ToInt32(unavailabilityRequest[e, d, s]);
                 }
             }
         }
@@ -157,11 +189,11 @@ public class SchedulingService : ISchedulingService
         bool[,,] schedule = new bool[NumEmployees, NumDays, NumShifts];
         if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
         {
-            foreach (int e in AllEmployees)
+            for (int e = 0; e < NumEmployees; e++)
             {
-                foreach (int d in AllDays)
+                for (int d = 0; d < NumDays; d++)
                 {
-                    foreach (int s in AllShifts)
+                    for (int s = 0; s < NumShifts; s++)
                     {
                         var key = Tuple.Create(e, d, s);
 
@@ -170,14 +202,75 @@ public class SchedulingService : ISchedulingService
                             schedule[e, d, s] = true;
                         }
 
-                        if (solver.Value(shifts[key]) == 0F)
+                        if (solver.Value(shifts[key]) == 0f)
                         {
                             schedule[e, d, s] = false;
                         }
                     }
                 }
             }
+
         }
         return new SchedulingResult(status, schedule);
+    }
+
+    public static void SetSchedules(List<Schedule> schedules)
+    {
+        Schedules = schedules;
+    }
+
+    public static void SetPreferences(bool[,,] preferences)
+    {
+        int dim0 = preferences.GetLength(0);
+        int dim1 = preferences.GetLength(1);
+        int dim2 = preferences.GetLength(2);
+
+        bool[,,] copy = new bool[dim0, dim1, dim2];
+
+        for (int i = 0; i < dim0; i++)
+        {
+            for (int j = 0; j < dim1; j++)
+            {
+                for (int k = 0; k < dim2; k++)
+                {
+                    copy[i, j, k] = preferences[i, j, k];
+                }
+            }
+        }
+
+        Preferences = copy;
+    }
+
+    public static void RestoreToDefault()
+    {
+        Schedules = new List<Schedule>();
+
+        NumEmployees = 5;
+        NumDays = 7;
+        NumShifts = 3;
+        AllEmployees = new List<Employee>();
+
+        AllEmployees.Add(new Employee("Josh", Role.Manager, 0));
+        AllEmployees.Add(new Employee("Maria", Role.Manager, 1));
+        AllEmployees.Add(new Employee("Antony", Role.Employee, 2));
+        AllEmployees.Add(new Employee("Viktor", Role.Employee, 3));
+        AllEmployees.Add(new Employee("Henry", Role.Employee, 4));
+
+        AllDays = new List<Day>();
+
+        AllDays.Add(new Day("Monday", 0));
+        AllDays.Add(new Day("Tuesday", 1));
+        AllDays.Add(new Day("Wednesday", 2));
+        AllDays.Add(new Day("Thursday", 3));
+        AllDays.Add(new Day("Friday", 4));
+        AllDays.Add(new Day("Saturday", 5));
+        AllDays.Add(new Day("Sunday", 6));
+
+
+        AllShifts = new List<Shift>();
+        for (int s = 0; s < NumShifts; s++)
+        {
+            AllShifts.Add(new Shift($"Shift {s + 1}", s));
+        }
     }
 }
