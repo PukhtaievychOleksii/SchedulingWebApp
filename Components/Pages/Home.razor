@@ -356,8 +356,6 @@
 
     private void Generate()
     {
-        _newSchedule.Name = $"Week {_schedules.Count + 1}";
-
         //Set preferences priority
         int[] preferencesPriority = new int[SchedulingService.NumEmployees];
         if (_schedules.Count > 0)
@@ -486,6 +484,8 @@
 
         //Reset
         _newSchedule = CreateNewSchedule();
+        _newSchedule.Name = $"Week {_schedules.Count + 1}";
+
 
     }
 
