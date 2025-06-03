@@ -322,6 +322,7 @@
         _newSchedule.Name = $"Week {_schedules.Count + 1}";
         _startSchedule.Name = $"Week {_schedules.Count + 0}";
         _startSchedule.NextPriority = GetPreferencesPriority(_startSchedule, true);
+        _startSchedule.MakeParametersSnapshot();
     }
 
     private void SetChartTypes()
@@ -692,15 +693,7 @@
         {
             priorityCoef[e] = 1;
             priorityCoef[e] += (int)(_newSchedule.RolePercentage[e] * ((double)SchedulingService.PriorityUnit / 100));
-            if (roleOnly)
-            {
-                continue;
-            }
-            if(schedule.UnsatisfactionPercentage[e] != 0)
-            {
-                priorityCoef[e] += (int)(schedule.UnsatisfactionPercentage[e] * ((double)SchedulingService.PriorityUnit / 100));
-            }
-            foreach(ScheduleParameter parameter in scheduleParameters.Keys)
+            foreach (ScheduleParameter parameter in scheduleParameters.Keys)
             {
                 if (scheduleParameters[parameter][e] == 0) continue;
                 int maxValue = parameter.MaxValue;
@@ -709,15 +702,24 @@
                 {
                     priorityCoef[e] += (int)((double)(scheduleParameters[parameter][e] - minValue) / (maxValue - minValue) * SchedulingService.PriorityUnit);
                 }
-                if(minValue <= 0 && maxValue <= 0)
+                if (minValue <= 0 && maxValue <= 0)
                 {
                     priorityCoef[e] -= (int)((double)(scheduleParameters[parameter][e] - maxValue) / (minValue - maxValue) * SchedulingService.PriorityUnit);
                 }
-                if(priorityCoef[e] <= 0)
+                if (priorityCoef[e] <= 0)
                 {
                     priorityCoef[e] = SchedulingService.PriorityUnit / 10;
                 }
             }
+            if (roleOnly)
+            {
+                continue;
+            }
+            if(schedule.UnsatisfactionPercentage[e] != 0)
+            {
+                priorityCoef[e] += (int)(schedule.UnsatisfactionPercentage[e] * ((double)SchedulingService.PriorityUnit / 100));
+            }
+            
             priorityCoef[e] += schedule.UnsatisfactionStreak[e] * (SchedulingService.PriorityUnit / 10);
         }
 
